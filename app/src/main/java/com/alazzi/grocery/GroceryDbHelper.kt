@@ -23,86 +23,168 @@ class GroceryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
     }
 
     override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL(
-            """
-            CREATE TABLE $TABLE_PRODUCTS (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                category TEXT NOT NULL,
-                barcode TEXT,
-                cost_price REAL NOT NULL,
-                sell_price REAL NOT NULL,
-                stock_qty REAL NOT NULL,
-                unit TEXT NOT NULL
-            )
-            """.trimIndent()
-        )
-
-        db.execSQL(
-            """
-            CREATE TABLE $TABLE_CUSTOMERS (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                phone TEXT,
-                balance_debt REAL NOT NULL DEFAULT 0.0,
-                notes TEXT
-            )
-            """.trimIndent()
-        )
-
-        db.execSQL(
-            """
-            CREATE TABLE $TABLE_INVOICES (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                invoice_number TEXT NOT NULL,
-                timestamp INTEGER NOT NULL,
-                customer_id INTEGER,
-                customer_name TEXT,
-                payment_type TEXT NOT NULL,
-                total_amount REAL NOT NULL,
-                paid_amount REAL NOT NULL,
-                remaining_debt REAL NOT NULL
-            )
-            """.trimIndent()
-        )
-
-        db.execSQL(
-            """
-            CREATE TABLE $TABLE_INVOICE_ITEMS (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                invoice_id INTEGER NOT NULL,
-                product_id INTEGER NOT NULL,
-                product_name TEXT NOT NULL,
-                unit_price REAL NOT NULL,
-                quantity REAL NOT NULL,
-                subtotal REAL NOT NULL
-            )
-            """.trimIndent()
-        )
-
-        db.execSQL(
-            """
-            CREATE TABLE $TABLE_DEBT_PAYMENTS (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                customer_id INTEGER NOT NULL,
-                customer_name TEXT NOT NULL,
-                amount REAL NOT NULL,
-                timestamp INTEGER NOT NULL,
-                notes TEXT
-            )
-            """.trimIndent()
-        )
-
+        ensureAllTablesAndColumns(db)
         seedInitialData(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_DEBT_PAYMENTS")
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_INVOICE_ITEMS")
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_INVOICES")
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_CUSTOMERS")
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_PRODUCTS")
-        onCreate(db)
+        // Keep user data safe, migrate schema smoothly
+        ensureAllTablesAndColumns(db)
+    }
+
+    override fun onDowngrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        // Never throw SQLiteException on downgrade from external imported databases
+        ensureAllTablesAndColumns(db)
+    }
+
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        ensureAllTablesAndColumns(db)
+    }
+
+    fun ensureAllTablesAndColumns(db: SQLiteDatabase) {
+        try {
+            // 1. Products Table
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS $TABLE_PRODUCTS (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    category TEXT NOT NULL DEFAULT 'OTHER',
+                    barcode TEXT DEFAULT '',
+                    cost_price REAL NOT NULL DEFAULT 0.0,
+                    sell_price REAL NOT NULL DEFAULT 0.0,
+                    stock_qty REAL NOT NULL DEFAULT 0.0,
+                    unit TEXT NOT NULL DEFAULT 'حبة'
+                )
+                """.trimIndent()
+            )
+            ensureColumn(db, TABLE_PRODUCTS, "category", "TEXT NOT NULL DEFAULT 'OTHER'")
+            ensureColumn(db, TABLE_PRODUCTS, "barcode", "TEXT DEFAULT ''")
+            ensureColumn(db, TABLE_PRODUCTS, "cost_price", "REAL NOT NULL DEFAULT 0.0")
+            ensureColumn(db, TABLE_PRODUCTS, "sell_price", "REAL NOT NULL DEFAULT 0.0")
+            ensureColumn(db, TABLE_PRODUCTS, "stock_qty", "REAL NOT NULL DEFAULT 0.0")
+            ensureColumn(db, TABLE_PRODUCTS, "unit", "TEXT NOT NULL DEFAULT 'حبة'")
+
+            // 2. Customers Table
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS $TABLE_CUSTOMERS (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    phone TEXT DEFAULT '',
+                    balance_debt REAL NOT NULL DEFAULT 0.0,
+                    notes TEXT DEFAULT ''
+                )
+                """.trimIndent()
+            )
+            ensureColumn(db, TABLE_CUSTOMERS, "phone", "TEXT DEFAULT ''")
+            ensureColumn(db, TABLE_CUSTOMERS, "balance_debt", "REAL NOT NULL DEFAULT 0.0")
+            ensureColumn(db, TABLE_CUSTOMERS, "notes", "TEXT DEFAULT ''")
+
+            // 3. Invoices Table
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS $TABLE_INVOICES (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    invoice_number TEXT NOT NULL,
+                    timestamp INTEGER NOT NULL,
+                    customer_id INTEGER,
+                    customer_name TEXT DEFAULT '',
+                    payment_type TEXT NOT NULL DEFAULT 'CASH',
+                    total_amount REAL NOT NULL DEFAULT 0.0,
+                    paid_amount REAL NOT NULL DEFAULT 0.0,
+                    remaining_debt REAL NOT NULL DEFAULT 0.0
+                )
+                """.trimIndent()
+            )
+            ensureColumn(db, TABLE_INVOICES, "customer_id", "INTEGER")
+            ensureColumn(db, TABLE_INVOICES, "customer_name", "TEXT DEFAULT ''")
+            ensureColumn(db, TABLE_INVOICES, "payment_type", "TEXT NOT NULL DEFAULT 'CASH'")
+            ensureColumn(db, TABLE_INVOICES, "total_amount", "REAL NOT NULL DEFAULT 0.0")
+            ensureColumn(db, TABLE_INVOICES, "paid_amount", "REAL NOT NULL DEFAULT 0.0")
+            ensureColumn(db, TABLE_INVOICES, "remaining_debt", "REAL NOT NULL DEFAULT 0.0")
+
+            // 4. Invoice Items Table
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS $TABLE_INVOICE_ITEMS (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    invoice_id INTEGER NOT NULL,
+                    product_id INTEGER NOT NULL,
+                    product_name TEXT NOT NULL,
+                    unit_price REAL NOT NULL DEFAULT 0.0,
+                    quantity REAL NOT NULL DEFAULT 1.0,
+                    subtotal REAL NOT NULL DEFAULT 0.0
+                )
+                """.trimIndent()
+            )
+            ensureColumn(db, TABLE_INVOICE_ITEMS, "product_name", "TEXT NOT NULL DEFAULT ''")
+            ensureColumn(db, TABLE_INVOICE_ITEMS, "unit_price", "REAL NOT NULL DEFAULT 0.0")
+            ensureColumn(db, TABLE_INVOICE_ITEMS, "quantity", "REAL NOT NULL DEFAULT 1.0")
+            ensureColumn(db, TABLE_INVOICE_ITEMS, "subtotal", "REAL NOT NULL DEFAULT 0.0")
+
+            // 5. Debt Payments Table
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS $TABLE_DEBT_PAYMENTS (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    customer_id INTEGER NOT NULL,
+                    customer_name TEXT NOT NULL,
+                    amount REAL NOT NULL DEFAULT 0.0,
+                    timestamp INTEGER NOT NULL,
+                    notes TEXT DEFAULT ''
+                )
+                """.trimIndent()
+            )
+            ensureColumn(db, TABLE_DEBT_PAYMENTS, "notes", "TEXT DEFAULT ''")
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun ensureColumn(db: SQLiteDatabase, tableName: String, columnName: String, columnDef: String) {
+        var cursor: Cursor? = null
+        try {
+            cursor = db.rawQuery("PRAGMA table_info($tableName)", null)
+            var exists = false
+            val nameColIdx = cursor.getColumnIndex("name")
+            while (cursor.moveToNext()) {
+                val name = if (nameColIdx >= 0) cursor.getString(nameColIdx) else ""
+                if (name.equals(columnName, ignoreCase = true)) {
+                    exists = true
+                    break
+                }
+            }
+            if (!exists) {
+                db.execSQL("ALTER TABLE $tableName ADD COLUMN $columnName $columnDef")
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            cursor?.close()
+        }
+    }
+
+    // Safe cursor extensions to prevent any crash from missing columns in imported databases
+    private fun Cursor.getStringSafe(name: String, default: String = ""): String {
+        val idx = getColumnIndex(name)
+        return if (idx >= 0 && !isNull(idx)) getString(idx) else default
+    }
+
+    private fun Cursor.getDoubleSafe(name: String, default: Double = 0.0): Double {
+        val idx = getColumnIndex(name)
+        return if (idx >= 0 && !isNull(idx)) getDouble(idx) else default
+    }
+
+    private fun Cursor.getLongSafe(name: String, default: Long = 0L): Long {
+        val idx = getColumnIndex(name)
+        return if (idx >= 0 && !isNull(idx)) getLong(idx) else default
+    }
+
+    private fun Cursor.getLongOrNullSafe(name: String): Long? {
+        val idx = getColumnIndex(name)
+        return if (idx >= 0 && !isNull(idx)) getLong(idx) else null
     }
 
     private fun seedInitialData(db: SQLiteDatabase) {
@@ -160,18 +242,18 @@ class GroceryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
             do {
                 list.add(
                     Product(
-                        id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
-                        name = cursor.getString(cursor.getColumnIndexOrThrow("name")),
+                        id = cursor.getLongSafe("id"),
+                        name = cursor.getStringSafe("name"),
                         category = try {
-                            ProductCategory.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("category")))
+                            ProductCategory.valueOf(cursor.getStringSafe("category", ProductCategory.OTHER.name))
                         } catch (_: Exception) {
                             ProductCategory.OTHER
                         },
-                        barcode = cursor.getString(cursor.getColumnIndexOrThrow("barcode")) ?: "",
-                        costPrice = cursor.getDouble(cursor.getColumnIndexOrThrow("cost_price")),
-                        sellPrice = cursor.getDouble(cursor.getColumnIndexOrThrow("sell_price")),
-                        stockQty = cursor.getDouble(cursor.getColumnIndexOrThrow("stock_qty")),
-                        unit = cursor.getString(cursor.getColumnIndexOrThrow("unit")) ?: "حبة"
+                        barcode = cursor.getStringSafe("barcode"),
+                        costPrice = cursor.getDoubleSafe("cost_price"),
+                        sellPrice = cursor.getDoubleSafe("sell_price"),
+                        stockQty = cursor.getDoubleSafe("stock_qty"),
+                        unit = cursor.getStringSafe("unit", "حبة")
                     )
                 )
             } while (cursor.moveToNext())
@@ -227,11 +309,11 @@ class GroceryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
             do {
                 list.add(
                     Customer(
-                        id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
-                        name = cursor.getString(cursor.getColumnIndexOrThrow("name")),
-                        phone = cursor.getString(cursor.getColumnIndexOrThrow("phone")) ?: "",
-                        balanceDebt = cursor.getDouble(cursor.getColumnIndexOrThrow("balance_debt")),
-                        notes = cursor.getString(cursor.getColumnIndexOrThrow("notes")) ?: ""
+                        id = cursor.getLongSafe("id"),
+                        name = cursor.getStringSafe("name"),
+                        phone = cursor.getStringSafe("phone"),
+                        balanceDebt = cursor.getDoubleSafe("balance_debt"),
+                        notes = cursor.getStringSafe("notes")
                     )
                 )
             } while (cursor.moveToNext())
@@ -337,23 +419,23 @@ class GroceryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
         val cursor = db.rawQuery("SELECT * FROM $TABLE_INVOICES ORDER BY timestamp DESC", null)
         if (cursor.moveToFirst()) {
             do {
-                val id = cursor.getLong(cursor.getColumnIndexOrThrow("id"))
+                val id = cursor.getLongSafe("id")
                 val items = getInvoiceItems(id)
                 invoices.add(
                     Invoice(
                         id = id,
-                        invoiceNumber = cursor.getString(cursor.getColumnIndexOrThrow("invoice_number")),
-                        timestamp = cursor.getLong(cursor.getColumnIndexOrThrow("timestamp")),
-                        customerId = if (cursor.isNull(cursor.getColumnIndexOrThrow("customer_id"))) null else cursor.getLong(cursor.getColumnIndexOrThrow("customer_id")),
-                        customerName = cursor.getString(cursor.getColumnIndexOrThrow("customer_name")),
+                        invoiceNumber = cursor.getStringSafe("invoice_number"),
+                        timestamp = cursor.getLongSafe("timestamp"),
+                        customerId = cursor.getLongOrNullSafe("customer_id"),
+                        customerName = cursor.getStringSafe("customer_name"),
                         paymentType = try {
-                            PaymentType.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("payment_type")))
+                            PaymentType.valueOf(cursor.getStringSafe("payment_type", PaymentType.CASH.name))
                         } catch (_: Exception) {
                             PaymentType.CASH
                         },
-                        totalAmount = cursor.getDouble(cursor.getColumnIndexOrThrow("total_amount")),
-                        paidAmount = cursor.getDouble(cursor.getColumnIndexOrThrow("paid_amount")),
-                        remainingDebt = cursor.getDouble(cursor.getColumnIndexOrThrow("remaining_debt")),
+                        totalAmount = cursor.getDoubleSafe("total_amount"),
+                        paidAmount = cursor.getDoubleSafe("paid_amount"),
+                        remainingDebt = cursor.getDoubleSafe("remaining_debt"),
                         items = items
                     )
                 )
@@ -371,13 +453,13 @@ class GroceryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
             do {
                 items.add(
                     InvoiceItem(
-                        id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
+                        id = cursor.getLongSafe("id"),
                         invoiceId = invoiceId,
-                        productId = cursor.getLong(cursor.getColumnIndexOrThrow("product_id")),
-                        productName = cursor.getString(cursor.getColumnIndexOrThrow("product_name")),
-                        unitPrice = cursor.getDouble(cursor.getColumnIndexOrThrow("unit_price")),
-                        quantity = cursor.getDouble(cursor.getColumnIndexOrThrow("quantity")),
-                        subtotal = cursor.getDouble(cursor.getColumnIndexOrThrow("subtotal"))
+                        productId = cursor.getLongSafe("product_id"),
+                        productName = cursor.getStringSafe("product_name"),
+                        unitPrice = cursor.getDoubleSafe("unit_price"),
+                        quantity = cursor.getDoubleSafe("quantity", 1.0),
+                        subtotal = cursor.getDoubleSafe("subtotal")
                     )
                 )
             } while (cursor.moveToNext())
@@ -696,12 +778,12 @@ class GroceryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
             do {
                 list.add(
                     DebtPayment(
-                        id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
-                        customerId = cursor.getLong(cursor.getColumnIndexOrThrow("customer_id")),
-                        customerName = cursor.getString(cursor.getColumnIndexOrThrow("customer_name")),
-                        amount = cursor.getDouble(cursor.getColumnIndexOrThrow("amount")),
-                        timestamp = cursor.getLong(cursor.getColumnIndexOrThrow("timestamp")),
-                        notes = cursor.getString(cursor.getColumnIndexOrThrow("notes")) ?: ""
+                        id = cursor.getLongSafe("id"),
+                        customerId = cursor.getLongSafe("customer_id"),
+                        customerName = cursor.getStringSafe("customer_name"),
+                        amount = cursor.getDoubleSafe("amount"),
+                        timestamp = cursor.getLongSafe("timestamp"),
+                        notes = cursor.getStringSafe("notes")
                     )
                 )
             } while (cursor.moveToNext())
@@ -723,12 +805,12 @@ class GroceryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
             do {
                 list.add(
                     DebtPayment(
-                        id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
-                        customerId = cursor.getLong(cursor.getColumnIndexOrThrow("customer_id")),
-                        customerName = cursor.getString(cursor.getColumnIndexOrThrow("customer_name")),
-                        amount = cursor.getDouble(cursor.getColumnIndexOrThrow("amount")),
-                        timestamp = cursor.getLong(cursor.getColumnIndexOrThrow("timestamp")),
-                        notes = cursor.getString(cursor.getColumnIndexOrThrow("notes")) ?: ""
+                        id = cursor.getLongSafe("id"),
+                        customerId = cursor.getLongSafe("customer_id"),
+                        customerName = cursor.getStringSafe("customer_name"),
+                        amount = cursor.getDoubleSafe("amount"),
+                        timestamp = cursor.getLongSafe("timestamp"),
+                        notes = cursor.getStringSafe("notes")
                     )
                 )
             } while (cursor.moveToNext())
@@ -796,7 +878,7 @@ class GroceryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
             }
         } ?: throw IllegalStateException("تعذر فتح وقراءة ملف قاعدة البيانات المحدد")
 
-        // Verify SQLite Header
+        // 1. Verify SQLite Header
         val header = ByteArray(16)
         FileInputStream(tempFile).use { it.read(header) }
         val headerStr = String(header)
@@ -805,18 +887,43 @@ class GroceryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
             throw IllegalArgumentException("الملف المختار ليس قاعدة بيانات SQLite صالحة!")
         }
 
-        // Test SQLite integrity
-        val testDb = SQLiteDatabase.openDatabase(tempFile.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
-        testDb.close()
+        // 2. Test SQLite integrity and prepare schema in temp file first
+        val testDb = SQLiteDatabase.openDatabase(tempFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE)
+        try {
+            val cursor = testDb.rawQuery("PRAGMA integrity_check", null)
+            val ok = cursor.moveToFirst() && cursor.getString(0).equals("ok", ignoreCase = true)
+            cursor.close()
+            if (!ok) {
+                testDb.close()
+                tempFile.delete()
+                throw IllegalArgumentException("الملف تالف ولا يمكن اعتماده كقاعدة بيانات")
+            }
+            // Set database version to current app version to prevent downgrade exception
+            testDb.version = DATABASE_VERSION
+            // Guarantee all needed tables and columns exist
+            ensureAllTablesAndColumns(testDb)
+        } finally {
+            testDb.close()
+        }
 
-        // Close current database connection
+        // 3. Backup current database before replacing
+        val dbPath = context.getDatabasePath(DATABASE_NAME)
+        val backupBak = File(dbPath.path + ".bak")
+        if (dbPath.exists()) {
+            try {
+                FileInputStream(dbPath).use { input ->
+                    FileOutputStream(backupBak).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 4. Close current database connection
         close()
 
-        // Replace database files
-        val dbPath = context.getDatabasePath(DATABASE_NAME)
-        if (dbPath.exists()) {
-            dbPath.delete()
-        }
+        // 5. Delete existing DB and journals
+        if (dbPath.exists()) dbPath.delete()
         val walFile = File(dbPath.path + "-wal")
         if (walFile.exists()) walFile.delete()
         val shmFile = File(dbPath.path + "-shm")
@@ -824,81 +931,30 @@ class GroceryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
         val journalFile = File(dbPath.path + "-journal")
         if (journalFile.exists()) journalFile.delete()
 
-        // Copy temp file to actual DB location
-        FileInputStream(tempFile).use { input ->
-            FileOutputStream(dbPath).use { output ->
-                input.copyTo(output)
+        // 6. Copy temp file to actual DB location
+        try {
+            FileInputStream(tempFile).use { input ->
+                FileOutputStream(dbPath).use { output ->
+                    input.copyTo(output)
+                }
             }
+        } catch (copyEx: Exception) {
+            // Restore backup if copy failed
+            if (backupBak.exists()) {
+                backupBak.copyTo(dbPath, overwrite = true)
+            }
+            throw copyEx
+        } finally {
+            tempFile.delete()
         }
-        tempFile.delete()
 
-        // Open newly restored DB and ensure all expected tables exist
+        // 7. Open newly restored DB and ensure all expected tables exist
         val reopenedDb = writableDatabase
-        reopenedDb.execSQL(
-            """
-            CREATE TABLE IF NOT EXISTS $TABLE_PRODUCTS (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                category TEXT NOT NULL,
-                barcode TEXT,
-                cost_price REAL NOT NULL,
-                sell_price REAL NOT NULL,
-                stock_qty REAL NOT NULL,
-                unit TEXT NOT NULL
-            )
-            """.trimIndent()
-        )
-        reopenedDb.execSQL(
-            """
-            CREATE TABLE IF NOT EXISTS $TABLE_CUSTOMERS (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                phone TEXT,
-                balance_debt REAL NOT NULL DEFAULT 0.0,
-                notes TEXT
-            )
-            """.trimIndent()
-        )
-        reopenedDb.execSQL(
-            """
-            CREATE TABLE IF NOT EXISTS $TABLE_INVOICES (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                invoice_number TEXT NOT NULL,
-                timestamp INTEGER NOT NULL,
-                customer_id INTEGER,
-                customer_name TEXT,
-                payment_type TEXT NOT NULL,
-                total_amount REAL NOT NULL,
-                paid_amount REAL NOT NULL,
-                remaining_debt REAL NOT NULL
-            )
-            """.trimIndent()
-        )
-        reopenedDb.execSQL(
-            """
-            CREATE TABLE IF NOT EXISTS $TABLE_INVOICE_ITEMS (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                invoice_id INTEGER NOT NULL,
-                product_id INTEGER NOT NULL,
-                product_name TEXT NOT NULL,
-                unit_price REAL NOT NULL,
-                quantity REAL NOT NULL,
-                subtotal REAL NOT NULL
-            )
-            """.trimIndent()
-        )
-        reopenedDb.execSQL(
-            """
-            CREATE TABLE IF NOT EXISTS $TABLE_DEBT_PAYMENTS (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                customer_id INTEGER NOT NULL,
-                customer_name TEXT NOT NULL,
-                amount REAL NOT NULL,
-                timestamp INTEGER NOT NULL,
-                notes TEXT
-            )
-            """.trimIndent()
-        )
+        reopenedDb.version = DATABASE_VERSION
+        ensureAllTablesAndColumns(reopenedDb)
+
+        // Delete temporary backup on success
+        if (backupBak.exists()) backupBak.delete()
 
         val products = getAllProducts()
         val customers = getAllCustomers()
@@ -912,5 +968,26 @@ class GroceryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
             paymentsCount = payments.size,
             dbSizeBytes = dbPath.length()
         )
+    }
+
+    // Emergency repair / reset function to recover from corrupted database without crashing
+    fun repairOrResetDatabase(context: Context) {
+        try {
+            close()
+            val dbPath = context.getDatabasePath(DATABASE_NAME)
+            if (dbPath.exists()) dbPath.delete()
+            val walFile = File(dbPath.path + "-wal")
+            if (walFile.exists()) walFile.delete()
+            val shmFile = File(dbPath.path + "-shm")
+            if (shmFile.exists()) shmFile.delete()
+            val journalFile = File(dbPath.path + "-journal")
+            if (journalFile.exists()) journalFile.delete()
+
+            val db = writableDatabase
+            ensureAllTablesAndColumns(db)
+            seedInitialData(db)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 }

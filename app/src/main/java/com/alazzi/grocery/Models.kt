@@ -103,3 +103,17 @@ data class DatabaseImportSummary(
     val dbSizeBytes: Long
 )
 
+data class QuickShareData(
+    val title: String,
+    val subtitle: String,
+    val customerPhone: String = "",
+    val invoice: Invoice? = null,
+    val customerName: String = "",
+    val operationType: String = "",
+    val operationNumber: String = "",
+    val amount: Double = 0.0,
+    val date: String = "",
+    val details: String = "",
+    val finalBalance: Double = 0.0
+)
+

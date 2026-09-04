@@ -3,6 +3,7 @@ package com.alazzi.grocery
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -68,6 +69,59 @@ class MainActivity : ComponentActivity() {
                     var currentDestination by remember { mutableStateOf(GroceryNavDestination.POS) }
                     var showSplashScreen by remember { mutableStateOf(true) }
                     var showStoreInfoDialog by remember { mutableStateOf(false) }
+                    var showExitConfirmDialog by remember { mutableStateOf(false) }
+
+                    // Exit confirmation interceptor
+                    BackHandler(enabled = !showSplashScreen) {
+                        when {
+                            state.isShowingCustomerStatementDialog -> viewModel.closeCustomerStatement()
+                            state.isShowingDbManagementDialog -> viewModel.showDbManagementDialog(false)
+                            state.isShowingEditStoreDialog -> viewModel.showEditStoreDialog(false)
+                            state.isShowingReceiptDialog -> viewModel.showReceiptDialog(null)
+                            showStoreInfoDialog -> showStoreInfoDialog = false
+                            currentDestination != GroceryNavDestination.POS -> currentDestination = GroceryNavDestination.POS
+                            else -> showExitConfirmDialog = true
+                        }
+                    }
+
+                    if (showExitConfirmDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showExitConfirmDialog = false },
+                            icon = {
+                                Icon(
+                                    Icons.Default.ExitToApp,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            },
+                            title = {
+                                Text("الخروج من التطبيق", fontWeight = FontWeight.Bold)
+                            },
+                            text = {
+                                Text(
+                                    "هل أنت متأكد من رغبتك في إغلاق نظام ${state.storeInfo.name}؟ لن تفقد أي بيانات تم حفظها.",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        showExitConfirmDialog = false
+                                        (context as? ComponentActivity)?.finish()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = DebtRed)
+                                ) {
+                                    Text("نعم، إغلاق التطبيق")
+                                }
+                            },
+                            dismissButton = {
+                                OutlinedButton(onClick = { showExitConfirmDialog = false }) {
+                                    Text("إلغاء واستمرار")
+                                }
+                            }
+                        )
+                    }
 
                     if (showSplashScreen) {
                         SplashScreen(
@@ -98,7 +152,7 @@ class MainActivity : ComponentActivity() {
                                     title = {
                                         Column(modifier = Modifier.clickable { showStoreInfoDialog = true }) {
                                             Text(
-                                                text = "بقالة العزي للمواد الغذائية",
+                                                text = state.storeInfo.name,
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 17.sp
                                             )
@@ -110,6 +164,12 @@ class MainActivity : ComponentActivity() {
                                         }
                                     },
                                     actions = {
+                                        IconButton(onClick = { viewModel.showDbManagementDialog(true) }) {
+                                            Icon(Icons.Default.Storage, contentDescription = "إدارة واستيراد قاعدة البيانات")
+                                        }
+                                        IconButton(onClick = { viewModel.showEditStoreDialog(true) }) {
+                                            Icon(Icons.Default.EditNote, contentDescription = "تعديل بيانات المتجر")
+                                        }
                                         IconButton(onClick = { showStoreInfoDialog = true }) {
                                             Icon(Icons.Default.Storefront, contentDescription = "معلومات البقالة والمالك")
                                         }
@@ -173,10 +233,69 @@ class MainActivity : ComponentActivity() {
                         // Store Info Dialog
                         if (showStoreInfoDialog) {
                             StoreInfoDialog(
+                                storeInfo = state.storeInfo,
+                                onEditStore = {
+                                    showStoreInfoDialog = false
+                                    viewModel.showEditStoreDialog(true)
+                                },
+                                onManageDb = {
+                                    showStoreInfoDialog = false
+                                    viewModel.showDbManagementDialog(true)
+                                },
                                 onDismiss = { showStoreInfoDialog = false },
                                 onShowSplash = {
                                     showStoreInfoDialog = false
                                     showSplashScreen = true
+                                }
+                            )
+                        }
+
+                        // Edit Store Dialog
+                        if (state.isShowingEditStoreDialog) {
+                            EditStoreDialog(
+                                initialStoreInfo = state.storeInfo,
+                                onSave = { updated ->
+                                    viewModel.updateStoreInfo(updated)
+                                },
+                                onDismiss = { viewModel.showEditStoreDialog(false) }
+                            )
+                        }
+
+                        // Database Management & Import Dialog
+                        if (state.isShowingDbManagementDialog) {
+                            DatabaseManagementDialog(
+                                stats = state.databaseStats,
+                                isLoading = state.isDatabaseLoading,
+                                onImport = { uri ->
+                                    viewModel.importDatabaseFromUri(uri) { _, _ -> }
+                                },
+                                onExport = { uri ->
+                                    viewModel.exportDatabaseToUri(uri) { _, _ -> }
+                                },
+                                onShare = {
+                                    viewModel.shareDatabaseBackup(context)
+                                },
+                                onDismiss = { viewModel.showDbManagementDialog(false) }
+                            )
+                        }
+
+                        // Customer Statement Dialog
+                        if (state.isShowingCustomerStatementDialog && state.statementCustomer != null) {
+                            val cust = state.statementCustomer!!
+                            CustomerStatementDialog(
+                                customer = cust,
+                                invoices = state.statementInvoices,
+                                payments = state.statementPayments,
+                                storeInfo = state.storeInfo,
+                                onDismiss = { viewModel.closeCustomerStatement() },
+                                onAddMovement = { isForCustomer, amount, details ->
+                                    viewModel.addDirectMovement(cust.id, cust.name, isForCustomer, amount, details)
+                                },
+                                onUpdatePayment = { paymentId, amount, notes ->
+                                    viewModel.updatePaymentRecord(paymentId, cust.id, amount, notes)
+                                },
+                                onUpdateInvoice = { invoiceId, total, paid, desc ->
+                                    viewModel.updateInvoiceRecord(invoiceId, cust.id, total, paid, desc)
                                 }
                             )
                         }
@@ -186,6 +305,7 @@ class MainActivity : ComponentActivity() {
                     if (state.isShowingReceiptDialog && state.currentReceiptInvoice != null) {
                         ThermalReceiptDialog(
                             invoice = state.currentReceiptInvoice!!,
+                            storeInfo = state.storeInfo,
                             onDismiss = { viewModel.showReceiptDialog(null) }
                         )
                     }
@@ -197,6 +317,9 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun StoreInfoDialog(
+    storeInfo: StoreInfo,
+    onEditStore: () -> Unit,
+    onManageDb: () -> Unit,
     onDismiss: () -> Unit,
     onShowSplash: () -> Unit
 ) {
@@ -221,12 +344,12 @@ fun StoreInfoDialog(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(190.dp)
+                        .height(180.dp)
                         .clip(RoundedCornerShape(16.dp))
                 ) {
                     Image(
                         painter = painterResource(id = R.drawable.img_splash_bg),
-                        contentDescription = "صورة بقالة العزي",
+                        contentDescription = "صورة المتجر",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
                     )
@@ -237,8 +360,8 @@ fun StoreInfoDialog(
                             .fillMaxSize()
                             .background(
                                 Brush.verticalGradient(
-                                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f)),
-                                    startY = 100f
+                                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f)),
+                                    startY = 80f
                                 )
                             )
                     )
@@ -261,22 +384,23 @@ fun StoreInfoDialog(
                             .padding(12.dp)
                     ) {
                         Text(
-                            text = "بقالة العزي للمواد الغذائية",
+                            text = storeInfo.name,
                             fontWeight = FontWeight.Bold,
                             color = Color.White,
                             fontSize = 16.sp
                         )
                         Text(
-                            text = "مرحباً بكم دائماً • خدمة موثوقة",
+                            text = storeInfo.activity,
                             color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 12.sp
+                            fontSize = 12.sp,
+                            maxLines = 1
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                // Store info pills
+                // Store info details card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
@@ -289,24 +413,57 @@ fun StoreInfoDialog(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("المالك والإدارة: العزي", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            Text("المالك / المسؤول: ${storeInfo.ownerName}", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Phone, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.Phone, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("رقم التواصل: 0501112233", fontSize = 14.sp)
+                            Text("رقم الهاتف: ${storeInfo.phone}", fontSize = 13.sp)
+                        }
+                        if (storeInfo.address.isNotBlank()) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("العنوان: ${storeInfo.address}", fontSize = 13.sp)
+                            }
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Storefront, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.AttachMoney, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("النشاط: مواد غذائية، معلبات، مشروبات وتموينات", fontSize = 13.sp)
+                            Text("العملة المعتمدة: ${storeInfo.currency}", fontSize = 13.sp)
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Management Action Buttons
+                Button(
+                    onClick = onEditStore,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("تعديل اسم وبيانات المتجر", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedButton(
+                    onClick = onManageDb,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Default.Storage, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("استيراد ونسخ قاعدة البيانات", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -314,7 +471,7 @@ fun StoreInfoDialog(
                 ) {
                     FilledTonalButton(
                         onClick = {
-                            ThermalReceiptHelper.shareViaWhatsApp(context, "0501112233", "السلام عليكم، بقالة العزي للمواد الغذائية")
+                            ThermalReceiptHelper.shareViaWhatsApp(context, storeInfo.phone, "السلام عليكم، مرحباً بكم في ${storeInfo.name}")
                         },
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(10.dp),
@@ -325,18 +482,17 @@ fun StoreInfoDialog(
                     ) {
                         Icon(Icons.Default.Chat, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("واتساب", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("واتساب", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
 
-                    Button(
+                    OutlinedButton(
                         onClick = onShowSplash,
-                        modifier = Modifier.weight(1.2f),
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp)
                     ) {
                         Icon(Icons.Default.Fullscreen, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("شاشة البداية", fontSize = 13.sp)
+                        Text("شاشة البداية", fontSize = 12.sp)
                     }
                 }
             }

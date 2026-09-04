@@ -4,6 +4,10 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.net.Uri
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 
 class GroceryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
 
@@ -472,6 +476,218 @@ class GroceryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
         return invoiceId
     }
 
+    fun createTableInvoice(
+        rows: List<InvoiceRowDraft>,
+        paymentType: PaymentType,
+        customerId: Long?,
+        customerName: String?,
+        paidAmount: Double
+    ): Long {
+        val db = writableDatabase
+        var invoiceId: Long = -1
+        db.beginTransaction()
+        try {
+            val totalAmount = rows.sumOf { it.subtotal }
+            val remainingDebt = if (paymentType == PaymentType.CREDIT) {
+                totalAmount - paidAmount
+            } else 0.0
+
+            val invNum = "INV-" + (System.currentTimeMillis() % 100000)
+
+            val cvInv = ContentValues().apply {
+                put("invoice_number", invNum)
+                put("timestamp", System.currentTimeMillis())
+                put("customer_id", customerId)
+                put("customer_name", customerName)
+                put("payment_type", paymentType.name)
+                put("total_amount", totalAmount)
+                put("paid_amount", paidAmount)
+                put("remaining_debt", remainingDebt)
+            }
+            invoiceId = db.insert(TABLE_INVOICES, null, cvInv)
+
+            for (row in rows) {
+                val cleanName = row.name.trim().ifBlank { "صنف عام" }
+                // Check if product exists in inventory; if not, add it without duplicates
+                var prodId = 0L
+                val cursor = db.rawQuery(
+                    "SELECT id FROM $TABLE_PRODUCTS WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1",
+                    arrayOf(cleanName)
+                )
+                if (cursor.moveToFirst()) {
+                    prodId = cursor.getLong(0)
+                } else {
+                    val cvNewProd = ContentValues().apply {
+                        put("name", cleanName)
+                        put("category", ProductCategory.OTHER.name)
+                        put("barcode", "")
+                        put("cost_price", row.price * 0.85)
+                        put("sell_price", row.price)
+                        put("stock_qty", 100.0)
+                        put("unit", "حبة")
+                    }
+                    prodId = db.insert(TABLE_PRODUCTS, null, cvNewProd)
+                }
+                cursor.close()
+
+                val cvItem = ContentValues().apply {
+                    put("invoice_id", invoiceId)
+                    put("product_id", prodId)
+                    put("product_name", cleanName)
+                    put("unit_price", row.price)
+                    put("quantity", row.quantity)
+                    put("subtotal", row.subtotal)
+                }
+                db.insert(TABLE_INVOICE_ITEMS, null, cvItem)
+            }
+
+            if (paymentType == PaymentType.CREDIT && customerId != null && remainingDebt > 0) {
+                db.execSQL("UPDATE $TABLE_CUSTOMERS SET balance_debt = balance_debt + ? WHERE id = ?", arrayOf(remainingDebt, customerId))
+            }
+
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return invoiceId
+    }
+
+    // Direct movement matching "له" and "عليه" in Screenshot 2
+    fun addDirectCustomerMovement(
+        customerId: Long,
+        customerName: String,
+        isForCustomer: Boolean, // true = له (دفع وسدد), false = عليه (دين/مشتريات)
+        amount: Double,
+        details: String,
+        timestamp: Long
+    ): Long {
+        val db = writableDatabase
+        var resultId: Long = -1
+        db.beginTransaction()
+        try {
+            if (isForCustomer) {
+                // له = سداد دفعة نقدية تقلل الدين
+                val cv = ContentValues().apply {
+                    put("customer_id", customerId)
+                    put("customer_name", customerName)
+                    put("amount", amount)
+                    put("timestamp", timestamp)
+                    put("notes", details.ifBlank { "دفعة نقدية (له)" })
+                }
+                resultId = db.insert(TABLE_DEBT_PAYMENTS, null, cv)
+                db.execSQL(
+                    "UPDATE $TABLE_CUSTOMERS SET balance_debt = balance_debt - ? WHERE id = ?",
+                    arrayOf(amount, customerId)
+                )
+            } else {
+                // عليه = إضافة دين / فاتورة مشتريات تزيد الدين
+                val invNum = "OP-" + (System.currentTimeMillis() % 100000)
+                val cvInv = ContentValues().apply {
+                    put("invoice_number", invNum)
+                    put("timestamp", timestamp)
+                    put("customer_id", customerId)
+                    put("customer_name", customerName)
+                    put("payment_type", PaymentType.CREDIT.name)
+                    put("total_amount", amount)
+                    put("paid_amount", 0.0)
+                    put("remaining_debt", amount)
+                }
+                resultId = db.insert(TABLE_INVOICES, null, cvInv)
+
+                val cvItem = ContentValues().apply {
+                    put("invoice_id", resultId)
+                    put("product_id", 0L)
+                    put("product_name", details.ifBlank { "مشتريات على الحساب (عليه)" })
+                    put("unit_price", amount)
+                    put("quantity", 1.0)
+                    put("subtotal", amount)
+                }
+                db.insert(TABLE_INVOICE_ITEMS, null, cvItem)
+
+                db.execSQL(
+                    "UPDATE $TABLE_CUSTOMERS SET balance_debt = balance_debt + ? WHERE id = ?",
+                    arrayOf(amount, customerId)
+                )
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return resultId
+    }
+
+    fun updateDebtPayment(id: Long, newAmount: Double, notes: String) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            var oldAmount = 0.0
+            var custId = 0L
+            val cursor = db.rawQuery("SELECT customer_id, amount FROM $TABLE_DEBT_PAYMENTS WHERE id = ?", arrayOf(id.toString()))
+            if (cursor.moveToFirst()) {
+                custId = cursor.getLong(0)
+                oldAmount = cursor.getDouble(1)
+            }
+            cursor.close()
+
+            val cv = ContentValues().apply {
+                put("amount", newAmount)
+                put("notes", notes)
+            }
+            db.update(TABLE_DEBT_PAYMENTS, cv, "id = ?", arrayOf(id.toString()))
+
+            val diff = newAmount - oldAmount
+            if (diff != 0.0 && custId != 0L) {
+                // Paying more decreases customer debt further
+                db.execSQL("UPDATE $TABLE_CUSTOMERS SET balance_debt = balance_debt - ? WHERE id = ?", arrayOf(diff, custId))
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun updateInvoiceRemaining(id: Long, newTotal: Double, newPaid: Double, newDesc: String) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            var oldRemaining = 0.0
+            var custId: Long? = null
+            val cursor = db.rawQuery("SELECT customer_id, remaining_debt FROM $TABLE_INVOICES WHERE id = ?", arrayOf(id.toString()))
+            if (cursor.moveToFirst()) {
+                if (!cursor.isNull(0)) custId = cursor.getLong(0)
+                oldRemaining = cursor.getDouble(1)
+            }
+            cursor.close()
+
+            val newRemaining = (newTotal - newPaid).coerceAtLeast(0.0)
+            val cv = ContentValues().apply {
+                put("total_amount", newTotal)
+                put("paid_amount", newPaid)
+                put("remaining_debt", newRemaining)
+            }
+            db.update(TABLE_INVOICES, cv, "id = ?", arrayOf(id.toString()))
+
+            if (newDesc.isNotBlank()) {
+                val cvItem = ContentValues().apply {
+                    put("product_name", newDesc)
+                    put("unit_price", newTotal)
+                    put("subtotal", newTotal)
+                }
+                db.update(TABLE_INVOICE_ITEMS, cvItem, "invoice_id = ?", arrayOf(id.toString()))
+            }
+
+            if (custId != null) {
+                val debtDiff = newRemaining - oldRemaining
+                if (debtDiff != 0.0) {
+                    db.execSQL("UPDATE $TABLE_CUSTOMERS SET balance_debt = balance_debt + ? WHERE id = ?", arrayOf(debtDiff, custId))
+                }
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     fun getPayments(): List<DebtPayment> {
         val list = mutableListOf<DebtPayment>()
         val db = readableDatabase
@@ -492,5 +708,209 @@ class GroceryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
         }
         cursor.close()
         return list
+    }
+
+    // Customer Account Statement Queries
+    fun getCustomerInvoices(customerId: Long): List<Invoice> {
+        return getAllInvoices().filter { it.customerId == customerId }
+    }
+
+    fun getCustomerPayments(customerId: Long): List<DebtPayment> {
+        val list = mutableListOf<DebtPayment>()
+        val db = readableDatabase
+        val cursor = db.rawQuery("SELECT * FROM $TABLE_DEBT_PAYMENTS WHERE customer_id = ? ORDER BY timestamp DESC", arrayOf(customerId.toString()))
+        if (cursor.moveToFirst()) {
+            do {
+                list.add(
+                    DebtPayment(
+                        id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
+                        customerId = cursor.getLong(cursor.getColumnIndexOrThrow("customer_id")),
+                        customerName = cursor.getString(cursor.getColumnIndexOrThrow("customer_name")),
+                        amount = cursor.getDouble(cursor.getColumnIndexOrThrow("amount")),
+                        timestamp = cursor.getLong(cursor.getColumnIndexOrThrow("timestamp")),
+                        notes = cursor.getString(cursor.getColumnIndexOrThrow("notes")) ?: ""
+                    )
+                )
+            } while (cursor.moveToNext())
+        }
+        cursor.close()
+        return list
+    }
+
+    // Database Statistics
+    fun getDatabaseStats(context: Context): DatabaseImportSummary {
+        val dbPath = context.getDatabasePath(DATABASE_NAME)
+        val size = if (dbPath.exists()) dbPath.length() else 0L
+        return DatabaseImportSummary(
+            productsCount = getAllProducts().size,
+            customersCount = getAllCustomers().size,
+            invoicesCount = getAllInvoices().size,
+            paymentsCount = getPayments().size,
+            dbSizeBytes = size
+        )
+    }
+
+    // Database Export to File (SAF)
+    fun exportDatabase(context: Context, destinationUri: Uri): Result<Long> = runCatching {
+        try {
+            writableDatabase.rawQuery("PRAGMA wal_checkpoint(FULL)", null).use { it.moveToFirst() }
+        } catch (_: Exception) {}
+
+        val dbFile = context.getDatabasePath(DATABASE_NAME)
+        if (!dbFile.exists()) {
+            throw IllegalStateException("ملف قاعدة البيانات غير موجود")
+        }
+
+        context.contentResolver.openOutputStream(destinationUri)?.use { outputStream ->
+            FileInputStream(dbFile).use { inputStream ->
+                inputStream.copyTo(outputStream)
+            }
+        } ?: throw IllegalStateException("تعذر الكتابة في مسار الملف المحدد")
+
+        dbFile.length()
+    }
+
+    // Prepare Backup File for Direct Sharing (WhatsApp / Drive / Bluetooth)
+    fun createBackupFileForSharing(context: Context): File {
+        try {
+            writableDatabase.rawQuery("PRAGMA wal_checkpoint(FULL)", null).use { it.moveToFirst() }
+        } catch (_: Exception) {}
+
+        val dbFile = context.getDatabasePath(DATABASE_NAME)
+        val backupDir = File(context.cacheDir, "backups").apply { mkdirs() }
+        val backupFile = File(backupDir, "alazzi_grocery_backup_${System.currentTimeMillis()}.db")
+        FileInputStream(dbFile).use { input ->
+            FileOutputStream(backupFile).use { output ->
+                input.copyTo(output)
+            }
+        }
+        return backupFile
+    }
+
+    // Database Import from File on Phone (SAF)
+    fun importDatabase(context: Context, sourceUri: Uri): Result<DatabaseImportSummary> = runCatching {
+        val tempFile = File(context.cacheDir, "imported_temp_${System.currentTimeMillis()}.db")
+        context.contentResolver.openInputStream(sourceUri)?.use { input ->
+            FileOutputStream(tempFile).use { output ->
+                input.copyTo(output)
+            }
+        } ?: throw IllegalStateException("تعذر فتح وقراءة ملف قاعدة البيانات المحدد")
+
+        // Verify SQLite Header
+        val header = ByteArray(16)
+        FileInputStream(tempFile).use { it.read(header) }
+        val headerStr = String(header)
+        if (!headerStr.startsWith("SQLite format 3")) {
+            tempFile.delete()
+            throw IllegalArgumentException("الملف المختار ليس قاعدة بيانات SQLite صالحة!")
+        }
+
+        // Test SQLite integrity
+        val testDb = SQLiteDatabase.openDatabase(tempFile.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
+        testDb.close()
+
+        // Close current database connection
+        close()
+
+        // Replace database files
+        val dbPath = context.getDatabasePath(DATABASE_NAME)
+        if (dbPath.exists()) {
+            dbPath.delete()
+        }
+        val walFile = File(dbPath.path + "-wal")
+        if (walFile.exists()) walFile.delete()
+        val shmFile = File(dbPath.path + "-shm")
+        if (shmFile.exists()) shmFile.delete()
+        val journalFile = File(dbPath.path + "-journal")
+        if (journalFile.exists()) journalFile.delete()
+
+        // Copy temp file to actual DB location
+        FileInputStream(tempFile).use { input ->
+            FileOutputStream(dbPath).use { output ->
+                input.copyTo(output)
+            }
+        }
+        tempFile.delete()
+
+        // Open newly restored DB and ensure all expected tables exist
+        val reopenedDb = writableDatabase
+        reopenedDb.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS $TABLE_PRODUCTS (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                barcode TEXT,
+                cost_price REAL NOT NULL,
+                sell_price REAL NOT NULL,
+                stock_qty REAL NOT NULL,
+                unit TEXT NOT NULL
+            )
+            """.trimIndent()
+        )
+        reopenedDb.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS $TABLE_CUSTOMERS (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                phone TEXT,
+                balance_debt REAL NOT NULL DEFAULT 0.0,
+                notes TEXT
+            )
+            """.trimIndent()
+        )
+        reopenedDb.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS $TABLE_INVOICES (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                invoice_number TEXT NOT NULL,
+                timestamp INTEGER NOT NULL,
+                customer_id INTEGER,
+                customer_name TEXT,
+                payment_type TEXT NOT NULL,
+                total_amount REAL NOT NULL,
+                paid_amount REAL NOT NULL,
+                remaining_debt REAL NOT NULL
+            )
+            """.trimIndent()
+        )
+        reopenedDb.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS $TABLE_INVOICE_ITEMS (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                invoice_id INTEGER NOT NULL,
+                product_id INTEGER NOT NULL,
+                product_name TEXT NOT NULL,
+                unit_price REAL NOT NULL,
+                quantity REAL NOT NULL,
+                subtotal REAL NOT NULL
+            )
+            """.trimIndent()
+        )
+        reopenedDb.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS $TABLE_DEBT_PAYMENTS (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_id INTEGER NOT NULL,
+                customer_name TEXT NOT NULL,
+                amount REAL NOT NULL,
+                timestamp INTEGER NOT NULL,
+                notes TEXT
+            )
+            """.trimIndent()
+        )
+
+        val products = getAllProducts()
+        val customers = getAllCustomers()
+        val invoices = getAllInvoices()
+        val payments = getPayments()
+
+        DatabaseImportSummary(
+            productsCount = products.size,
+            customersCount = customers.size,
+            invoicesCount = invoices.size,
+            paymentsCount = payments.size,
+            dbSizeBytes = dbPath.length()
+        )
     }
 }

@@ -30,6 +30,15 @@ data class CartItem(
     val total: Double get() = product.sellPrice * quantity
 }
 
+data class InvoiceRowDraft(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    var name: String = "",
+    var price: Double = 0.0,
+    var quantity: Double = 1.0
+) {
+    val subtotal: Double get() = price * quantity
+}
+
 data class Customer(
     val id: Long = 0,
     val name: String,
@@ -74,3 +83,23 @@ data class DebtPayment(
     val timestamp: Long,
     val notes: String = ""
 )
+
+data class StoreInfo(
+    val name: String = "بقالة العزي للمواد الغذائية",
+    val ownerName: String = "العزي",
+    val phone: String = "771234567",
+    val activity: String = "مواد غذائية، معلبات، مشروبات وتموينات",
+    val address: String = "الشارع العام",
+    val country: String = "اليمن",
+    val currency: String = "ريال يمني (ر.ي)",
+    val invoiceFooter: String = "شكراً لزيارتكم ونسعد بخدمتكم دائماً"
+)
+
+data class DatabaseImportSummary(
+    val productsCount: Int,
+    val customersCount: Int,
+    val invoicesCount: Int,
+    val paymentsCount: Int,
+    val dbSizeBytes: Long
+)
+

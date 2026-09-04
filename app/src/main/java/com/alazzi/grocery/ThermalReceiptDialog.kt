@@ -30,6 +30,7 @@ import java.util.Locale
 @Composable
 fun ThermalReceiptDialog(
     invoice: Invoice,
+    storeInfo: StoreInfo = StoreInfo(),
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -91,7 +92,7 @@ fun ThermalReceiptDialog(
                         ) {
                             Image(
                                 painter = painterResource(id = R.drawable.img_app_logo),
-                                contentDescription = "شعار بقالة العزي",
+                                contentDescription = "شعار المتجر",
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop
                             )
@@ -100,15 +101,17 @@ fun ThermalReceiptDialog(
                         Spacer(modifier = Modifier.height(4.dp))
 
                         Text(
-                            "بقالة العزي للمواد الغذائية",
+                            storeInfo.name,
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp,
-                            color = Color(0xFF111827)
+                            color = Color(0xFF111827),
+                            textAlign = TextAlign.Center
                         )
                         Text(
-                            "خدمة مميزة وجودة عالية",
+                            storeInfo.activity,
                             fontSize = 11.sp,
-                            color = Color(0xFF4B5563)
+                            color = Color(0xFF4B5563),
+                            textAlign = TextAlign.Center
                         )
                         Text(
                             "رقم الفاتورة: ${invoice.invoiceNumber}",
@@ -185,7 +188,7 @@ fun ThermalReceiptDialog(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text("الإجمالي الكلي:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.Black)
-                            Text("${String.format(Locale.US, "%.2f", invoice.totalAmount)} ر.ي", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.Black)
+                            Text("${String.format(Locale.US, "%.2f", invoice.totalAmount)} ${storeInfo.currency}", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.Black)
                         }
 
                         Row(
@@ -193,7 +196,7 @@ fun ThermalReceiptDialog(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text("المدفوع نقداً:", fontSize = 12.sp, color = Color(0xFF374151))
-                            Text("${String.format(Locale.US, "%.2f", invoice.paidAmount)} ر.ي", fontSize = 12.sp, color = Color(0xFF374151))
+                            Text("${String.format(Locale.US, "%.2f", invoice.paidAmount)} ${storeInfo.currency}", fontSize = 12.sp, color = Color(0xFF374151))
                         }
 
                         if (invoice.remainingDebt > 0) {
@@ -202,7 +205,7 @@ fun ThermalReceiptDialog(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text("المتبقي (دين):", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DebtRed)
-                                Text("${String.format(Locale.US, "%.2f", invoice.remainingDebt)} ر.ي", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DebtRed)
+                                Text("${String.format(Locale.US, "%.2f", invoice.remainingDebt)} ${storeInfo.currency}", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DebtRed)
                             }
                         }
 
@@ -210,8 +213,8 @@ fun ThermalReceiptDialog(
                         DashedDivider()
                         Spacer(modifier = Modifier.height(6.dp))
 
-                        Text("نسعد بخدمتكم دائماً ✨", fontSize = 11.sp, color = Color(0xFF4B5563))
-                        Text("بقالة العزي - هاتف: 0501112233", fontSize = 10.sp, color = Color(0xFF6B7280))
+                        Text(storeInfo.invoiceFooter, fontSize = 11.sp, color = Color(0xFF4B5563), textAlign = TextAlign.Center)
+                        Text("${storeInfo.name} - هاتف: ${storeInfo.phone}", fontSize = 10.sp, color = Color(0xFF6B7280), textAlign = TextAlign.Center)
                     }
                 }
 
@@ -220,7 +223,7 @@ fun ThermalReceiptDialog(
                 // Action Buttons (Print, WhatsApp, Share)
                 Button(
                     onClick = {
-                        ThermalReceiptHelper.printInvoice(context, invoice)
+                        ThermalReceiptHelper.printInvoice(context, invoice, storeInfo)
                     },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
@@ -239,8 +242,9 @@ fun ThermalReceiptDialog(
                 ) {
                     FilledTonalButton(
                         onClick = {
-                            val text = ThermalReceiptHelper.buildReceiptText(invoice)
-                            ThermalReceiptHelper.shareViaWhatsApp(context, "", text)
+                            val text = ThermalReceiptHelper.buildReceiptText(invoice, storeInfo)
+                            val phone = invoice.customerName?.let { "" } ?: ""
+                            ThermalReceiptHelper.shareViaWhatsApp(context, phone, text)
                         },
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(10.dp),
@@ -256,15 +260,36 @@ fun ThermalReceiptDialog(
 
                     OutlinedButton(
                         onClick = {
-                            val text = ThermalReceiptHelper.buildReceiptText(invoice)
-                            ThermalReceiptHelper.shareText(context, text, "مشاركة الفاتورة")
+                            val pdfFile = FileExportHelper.createInvoicePdf(context, invoice, storeInfo)
+                            if (pdfFile != null) {
+                                FileExportHelper.shareFile(context, pdfFile, "application/pdf", "فاتورة #${invoice.invoiceNumber}")
+                            } else {
+                                android.widget.Toast.makeText(context, "فشل إنشاء ملف PDF", android.widget.Toast.LENGTH_SHORT).show()
+                            }
                         },
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color(0xFFDC2626))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("مشاركة")
+                        Text("PDF", fontWeight = FontWeight.Bold)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            val imgFile = FileExportHelper.createInvoiceImage(context, invoice, storeInfo)
+                            if (imgFile != null) {
+                                FileExportHelper.shareFile(context, imgFile, "image/jpeg", "فاتورة #${invoice.invoiceNumber}")
+                            } else {
+                                android.widget.Toast.makeText(context, "فشل إنشاء صورة الفاتورة", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color(0xFF2563EB))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("صورة", fontWeight = FontWeight.Bold)
                     }
                 }
             }

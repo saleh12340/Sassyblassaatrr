@@ -53,6 +53,45 @@ fun ReportsScreen(
     ) {
         Spacer(modifier = Modifier.height(8.dp))
 
+        // Store and Database Quick Management Bar
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(
+                    onClick = { viewModel.showEditStoreDialog(true) },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Icon(Icons.Default.Storefront, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("بيانات المتجر", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+
+                FilledTonalButton(
+                    onClick = { viewModel.showDbManagementDialog(true) },
+                    modifier = Modifier.weight(1.2f),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Icon(Icons.Default.Storage, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("استيراد ونسخ البيانات", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         // Financial Dashboard KPI Cards
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -66,7 +105,7 @@ fun ReportsScreen(
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text("إجمالي المبيعات", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
                     Text(
-                        text = "${String.format(Locale.US, "%.2f", totalSales)} ر.ي",
+                        text = "${String.format(Locale.US, "%.2f", totalSales)} ${state.storeInfo.currency}",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
@@ -82,7 +121,7 @@ fun ReportsScreen(
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text("النقدية المحصلة", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
                     Text(
-                        text = "${String.format(Locale.US, "%.2f", totalCashCollected)} ر.ي",
+                        text = "${String.format(Locale.US, "%.2f", totalCashCollected)} ${state.storeInfo.currency}",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.secondary
@@ -105,7 +144,7 @@ fun ReportsScreen(
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text("إجمالي الديون المعلقة", style = MaterialTheme.typography.bodySmall, color = OnDebtRed)
                     Text(
-                        text = "${String.format(Locale.US, "%.2f", totalCustomerDebt)} ر.ي",
+                        text = "${String.format(Locale.US, "%.2f", totalCustomerDebt)} ${state.storeInfo.currency}",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = DebtRed
@@ -183,6 +222,7 @@ fun ReportsScreen(
                     items(filteredInvoices, key = { it.id }) { invoice ->
                         InvoiceItemCard(
                             invoice = invoice,
+                            currency = state.storeInfo.currency,
                             onClick = { viewModel.showReceiptDialog(invoice) },
                             onDelete = { viewModel.deleteInvoice(invoice.id) }
                         )
@@ -209,7 +249,7 @@ fun ReportsScreen(
                     contentPadding = PaddingValues(bottom = 20.dp)
                 ) {
                     items(state.debtPayments, key = { it.id }) { payment ->
-                        DebtPaymentItemCard(payment = payment)
+                        DebtPaymentItemCard(payment = payment, currency = state.storeInfo.currency)
                     }
                 }
             }
@@ -220,6 +260,7 @@ fun ReportsScreen(
 @Composable
 fun InvoiceItemCard(
     invoice: Invoice,
+    currency: String = "ر.ي",
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -229,7 +270,7 @@ fun InvoiceItemCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() },
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
@@ -281,13 +322,13 @@ fun InvoiceItemCard(
             ) {
                 Column {
                     Text(
-                        text = "الإجمالي: ${String.format(Locale.US, "%.2f", invoice.totalAmount)} ر.ي",
+                        text = "الإجمالي: ${String.format(Locale.US, "%.2f", invoice.totalAmount)} $currency",
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
                     )
                     if (invoice.remainingDebt > 0) {
                         Text(
-                            text = "المتبقي دين: ${String.format(Locale.US, "%.2f", invoice.remainingDebt)} ر.ي",
+                            text = "المتبقي دين: ${String.format(Locale.US, "%.2f", invoice.remainingDebt)} $currency",
                             style = MaterialTheme.typography.bodySmall,
                             color = DebtRed,
                             fontWeight = FontWeight.SemiBold
@@ -339,7 +380,10 @@ fun InvoiceItemCard(
 }
 
 @Composable
-fun DebtPaymentItemCard(payment: DebtPayment) {
+fun DebtPaymentItemCard(
+    payment: DebtPayment,
+    currency: String = "ر.ي"
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
@@ -372,7 +416,7 @@ fun DebtPaymentItemCard(payment: DebtPayment) {
                 color = MaterialTheme.colorScheme.primaryContainer
             ) {
                 Text(
-                    text = "+ ${String.format(Locale.US, "%.2f", payment.amount)} ر.ي",
+                    text = "+ ${String.format(Locale.US, "%.2f", payment.amount)} $currency",
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.bodyMedium,

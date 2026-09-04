@@ -94,15 +94,16 @@ fun PosScreen(
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "بقالة العزي للمواد الغذائية",
+                            text = state.storeInfo.name,
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                         Text(
-                            text = "خدمة ممتازة • اضغط لعرض بطاقة المحل",
+                            text = "${state.storeInfo.activity} • اضغط لعرض وتعديل البيانات",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1
                         )
                     }
 
@@ -122,14 +123,29 @@ fun PosScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Mode Toggle: Detailed vs Free Invoice
+            // Mode Toggle: Table Invoice vs Warehouse Catalog
             SingleChoiceSegmentedButtonRow(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 SegmentedButton(
+                    selected = state.isFreeInvoiceMode,
+                    onClick = { viewModel.setFreeInvoiceMode(true) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Default.TableChart,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                ) {
+                    Text("فاتورة جدولية (حرة وسريعة)", fontWeight = FontWeight.Bold)
+                }
+
+                SegmentedButton(
                     selected = !state.isFreeInvoiceMode,
                     onClick = { viewModel.setFreeInvoiceMode(false) },
-                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
                     icon = {
                         Icon(
                             imageVector = Icons.Default.Inventory2,
@@ -138,30 +154,15 @@ fun PosScreen(
                         )
                     }
                 ) {
-                    Text("فاتورة أصناف (مخزون)", fontWeight = FontWeight.Bold)
-                }
-
-                SegmentedButton(
-                    selected = state.isFreeInvoiceMode,
-                    onClick = { viewModel.setFreeInvoiceMode(true) },
-                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                    icon = {
-                        Icon(
-                            imageVector = Icons.Default.Bolt,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                ) {
-                    Text("فاتورة حرة سريعة", fontWeight = FontWeight.Bold)
+                    Text("أصناف المخزون", fontWeight = FontWeight.Bold)
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             if (state.isFreeInvoiceMode) {
-                // Free Invoice View
-                FreeInvoiceCard(viewModel = viewModel, state = state)
+                // Table-based Invoice View with Autocomplete & Small Font Table
+                TableInvoiceCard(viewModel = viewModel, state = state)
             } else {
                 // Detailed Invoice with Catalog
                 // Search Bar
@@ -419,64 +420,396 @@ fun ProductSaleCard(
 }
 
 @Composable
-fun FreeInvoiceCard(viewModel: GroceryViewModel, state: PosUiState) {
+fun TableInvoiceCard(viewModel: GroceryViewModel, state: PosUiState) {
+    var inputName by remember { mutableStateOf("") }
+    var inputPriceText by remember { mutableStateOf("") }
+    var inputQtyText by remember { mutableStateOf("1") }
+    var isSuggestionsExpanded by remember { mutableStateOf(false) }
     var showCustomerPicker by remember { mutableStateOf(false) }
+    var showWarehousePicker by remember { mutableStateOf(false) }
     var isPartialPaid by remember { mutableStateOf(false) }
     var partialAmountText by remember { mutableStateOf("") }
 
-    val totalAmount = state.freeInvoiceAmount.toDoubleOrNull() ?: 0.0
+    val invoiceTotal = remember(state.draftTableRows) {
+        state.draftTableRows.sumOf { it.subtotal }
+    }
+
+    val matchingSuggestions = remember(inputName, state.products) {
+        if (inputName.isBlank()) emptyList()
+        else state.products.filter {
+            it.name.contains(inputName, ignoreCase = true) || it.barcode.contains(inputName, ignoreCase = true)
+        }.take(6)
+    }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .imePadding(),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.FlashOn, contentDescription = null, tint = AmberSecondary)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    "إصدار فاتورة حرة سريعة",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+        ) {
+            // Header Bar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.ReceiptLong,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        "فاتورة مبيعات جدولية",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                if (state.draftTableRows.isNotEmpty()) {
+                    TextButton(
+                        onClick = { viewModel.clearDraftTable() },
+                        colors = ButtonDefaults.textButtonColors(contentColor = DebtRed),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("إفراغ الجدول", fontSize = 12.sp)
+                    }
+                }
             }
-            Text(
-                "مناسبة للبيع السريع بمبلغ مباشر دون اختيار أصناف من المخزن",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.outline
-            )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            OutlinedTextField(
-                value = state.freeInvoiceDesc,
-                onValueChange = { viewModel.setFreeInvoiceDesc(it) },
-                label = { Text("بيان / وصف الفاتورة") },
-                placeholder = { Text("مثال: خضار ومواد تموينية متنوعة") },
+            // Quick Item Entry with Autocomplete
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = inputName,
+                        onValueChange = {
+                            inputName = it
+                            isSuggestionsExpanded = it.isNotBlank()
+                        },
+                        label = { Text("اسم الصنف / البيان (اكتب للبحث السريع)") },
+                        placeholder = { Text("مثال: حليب داناو، سكر 10 كجم...") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        },
+                        trailingIcon = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (inputName.isNotEmpty()) {
+                                    IconButton(
+                                        onClick = {
+                                            inputName = ""
+                                            isSuggestionsExpanded = false
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(Icons.Default.Close, contentDescription = "مسح", modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                                IconButton(
+                                    onClick = { showWarehousePicker = true },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Inventory2,
+                                        contentDescription = "اختيار من المخزن",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp)
+                    )
+
+                    DropdownMenu(
+                        expanded = isSuggestionsExpanded && matchingSuggestions.isNotEmpty(),
+                        onDismissRequest = { isSuggestionsExpanded = false },
+                        modifier = Modifier.fillMaxWidth(0.92f)
+                    ) {
+                        matchingSuggestions.forEach { prod ->
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column {
+                                            Text(prod.name, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                            Text("الوحدة: ${prod.unit} • مخزون: ${prod.stockQty.toInt()}", fontSize = 11.sp, color = Color.Gray)
+                                        }
+                                        Text(
+                                            "${String.format(Locale.US, "%.2f", prod.sellPrice)} ${state.storeInfo.currency}",
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    inputName = prod.name
+                                    inputPriceText = if (prod.sellPrice % 1.0 == 0.0) prod.sellPrice.toInt().toString() else prod.sellPrice.toString()
+                                    isSuggestionsExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = inputQtyText,
+                        onValueChange = { inputQtyText = it },
+                        label = { Text("الكمية") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp)
+                    )
+
+                    OutlinedTextField(
+                        value = inputPriceText,
+                        onValueChange = { inputPriceText = it },
+                        label = { Text("السعر") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1.2f),
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp)
+                    )
+
+                    Button(
+                        onClick = {
+                            val price = inputPriceText.toDoubleOrNull() ?: 0.0
+                            val qty = inputQtyText.toDoubleOrNull() ?: 1.0
+                            if (inputName.isBlank()) {
+                                return@Button
+                            }
+                            if (price <= 0.0) {
+                                return@Button
+                            }
+                            viewModel.addDraftTableRow(inputName, price, if (qty <= 0) 1.0 else qty)
+                            inputName = ""
+                            inputPriceText = ""
+                            inputQtyText = "1"
+                            isSuggestionsExpanded = false
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.height(52.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("إضافة", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+
+                    OutlinedButton(
+                        onClick = { showWarehousePicker = true },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.height(52.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp)
+                    ) {
+                        Icon(Icons.Default.Storefront, contentDescription = null, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Professional Invoice Table (Matching Screenshot 3)
+            Card(
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                shape = RoundedCornerShape(10.dp)
-            )
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFCBD5E1))
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Table Header
+                    Surface(
+                        color = Color(0xFF1E5B94),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 7.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("م", modifier = Modifier.width(26.dp), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                            Text("الصنف / البيان", modifier = Modifier.weight(1.5f), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("الكمية", modifier = Modifier.width(48.dp), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                            Text("السعر", modifier = Modifier.width(52.dp), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                            Text("الإجمالي", modifier = Modifier.width(62.dp), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                            Text("حذف", modifier = Modifier.width(32.dp), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                        }
+                    }
 
-            Spacer(modifier = Modifier.height(12.dp))
+                    if (state.draftTableRows.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.PostAdd, contentDescription = null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(36.dp))
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    "لا توجد أصناف في الجدول بعد",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                                Text(
+                                    "اكتب اسم الصنف أعلاه أو اختر من المخزن للإضافة الفورية",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                            }
+                        }
+                    } else {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            state.draftTableRows.forEachIndexed { index, row ->
+                                val rowBg = if (index % 2 == 0) Color.White else Color(0xFFF8FAFC)
+                                Surface(
+                                    color = rowBg,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 5.dp, horizontal = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            "${index + 1}",
+                                            modifier = Modifier.width(26.dp),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.Gray,
+                                            textAlign = TextAlign.Center
+                                        )
+                                        Text(
+                                            row.name,
+                                            modifier = Modifier.weight(1.5f),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Row(
+                                            modifier = Modifier.width(48.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Center
+                                        ) {
+                                            IconButton(
+                                                onClick = { viewModel.updateDraftTableRowQty(row.id, -1.0) },
+                                                modifier = Modifier.size(20.dp)
+                                            ) {
+                                                Icon(Icons.Default.Remove, contentDescription = "نقص", modifier = Modifier.size(11.dp))
+                                            }
+                                            Text(
+                                                if (row.quantity % 1.0 == 0.0) row.quantity.toInt().toString() else String.format(Locale.US, "%.1f", row.quantity),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                textAlign = TextAlign.Center
+                                            )
+                                            IconButton(
+                                                onClick = { viewModel.updateDraftTableRowQty(row.id, 1.0) },
+                                                modifier = Modifier.size(20.dp)
+                                            ) {
+                                                Icon(Icons.Default.Add, contentDescription = "زيادة", modifier = Modifier.size(11.dp))
+                                            }
+                                        }
+                                        Text(
+                                            String.format(Locale.US, "%.2f", row.price),
+                                            modifier = Modifier.width(52.dp),
+                                            fontSize = 11.sp,
+                                            textAlign = TextAlign.Center
+                                        )
+                                        Text(
+                                            String.format(Locale.US, "%.2f", row.subtotal),
+                                            modifier = Modifier.width(62.dp),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            textAlign = TextAlign.Center
+                                        )
+                                        IconButton(
+                                            onClick = { viewModel.removeDraftTableRow(row.id) },
+                                            modifier = Modifier
+                                                .width(32.dp)
+                                                .size(24.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.DeleteOutline,
+                                                contentDescription = "حذف الصنف",
+                                                tint = DebtRed,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 0.5.dp)
+                            }
+                        }
+                    }
 
-            OutlinedTextField(
-                value = state.freeInvoiceAmount,
-                onValueChange = { viewModel.setFreeInvoiceAmount(it) },
-                label = { Text("المبلغ الإجمالي (ر.ي) *") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                leadingIcon = { Icon(Icons.Default.AttachMoney, contentDescription = null) },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                shape = RoundedCornerShape(10.dp)
-            )
+                    // Table Footer / Total
+                    Surface(
+                        color = Color(0xFFF1F5F9),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "عدد الأصناف: ${state.draftTableRows.size}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.DarkGray
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("المجموع الإجمالي: ", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    "${String.format(Locale.US, "%,.2f", invoiceTotal)} ${state.storeInfo.currency}",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             // Customer Selector
-            Text("العميل:", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+            Text("حساب العميل:", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(6.dp))
             OutlinedCard(
                 onClick = { showCustomerPicker = true },
@@ -486,38 +819,48 @@ fun FreeInvoiceCard(viewModel: GroceryViewModel, state: PosUiState) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
+                        .padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = state.selectedCustomer?.name ?: "عميل نقدي عام (افتراضي)",
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Column {
+                            Text(
+                                text = state.selectedCustomer?.name ?: "عميل نقدي عام (افتراضي)",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                            if (state.selectedCustomer != null && state.selectedCustomer!!.phone.isNotBlank()) {
+                                Text(
+                                    text = state.selectedCustomer!!.phone,
+                                    fontSize = 11.sp,
+                                    color = Color.Gray
+                                )
+                            }
+                        }
                     }
-                    Text("تغيير", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                    Text("تغيير العميل", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
                 }
             }
 
             // Customer Debt Alert if Indebted
             if (state.selectedCustomer != null && state.selectedCustomer!!.balanceDebt > 0) {
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = DebtRedContainer,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
-                        modifier = Modifier.padding(10.dp),
+                        modifier = Modifier.padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Warning, contentDescription = null, tint = DebtRed, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = DebtRed, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "تنبيه: على هذا العميل دين سابق بقيمة ${String.format(Locale.US, "%.2f", state.selectedCustomer!!.balanceDebt)} ر.ي",
+                            text = "تنبيه: على هذا العميل دين سابق بقيمة ${String.format(Locale.US, "%,.2f", state.selectedCustomer!!.balanceDebt)} ${state.storeInfo.currency}",
                             color = OnDebtRed,
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Bold
@@ -526,20 +869,20 @@ fun FreeInvoiceCard(viewModel: GroceryViewModel, state: PosUiState) {
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             // Payment Type Selector
             Text("طريقة السداد:", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(6.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilterChip(
                     selected = state.paymentType == PaymentType.CASH && !isPartialPaid,
                     onClick = {
                         viewModel.setPaymentType(PaymentType.CASH)
                         isPartialPaid = false
                     },
-                    label = { Text("نقداً (كاش)") },
-                    leadingIcon = { Icon(Icons.Default.Money, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    label = { Text("نقداً (كاش)", fontSize = 11.sp) },
+                    leadingIcon = { Icon(Icons.Default.Money, contentDescription = null, modifier = Modifier.size(14.dp)) },
                     modifier = Modifier.weight(1f)
                 )
 
@@ -553,8 +896,8 @@ fun FreeInvoiceCard(viewModel: GroceryViewModel, state: PosUiState) {
                             isPartialPaid = false
                         }
                     },
-                    label = { Text("آجل (دين)") },
-                    leadingIcon = { Icon(Icons.Default.CreditCard, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    label = { Text("آجل (دين)", fontSize = 11.sp) },
+                    leadingIcon = { Icon(Icons.Default.CreditCard, contentDescription = null, modifier = Modifier.size(14.dp)) },
                     modifier = Modifier.weight(1f)
                 )
 
@@ -568,7 +911,7 @@ fun FreeInvoiceCard(viewModel: GroceryViewModel, state: PosUiState) {
                             isPartialPaid = true
                         }
                     },
-                    label = { Text("دفعة + متبقي") },
+                    label = { Text("دفعة + متبقي", fontSize = 11.sp) },
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -584,9 +927,9 @@ fun FreeInvoiceCard(viewModel: GroceryViewModel, state: PosUiState) {
                     shape = RoundedCornerShape(10.dp)
                 )
                 val paid = partialAmountText.toDoubleOrNull() ?: 0.0
-                val remaining = maxOf(0.0, totalAmount - paid)
+                val remaining = maxOf(0.0, invoiceTotal - paid)
                 Text(
-                    text = "المتبقي كدين على العميل: ${String.format(Locale.US, "%.2f", remaining)} ر.ي",
+                    text = "المتبقي كدين على العميل: ${String.format(Locale.US, "%,.2f", remaining)} ${state.storeInfo.currency}",
                     color = DebtRed,
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.Bold,
@@ -594,23 +937,30 @@ fun FreeInvoiceCard(viewModel: GroceryViewModel, state: PosUiState) {
                 )
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
+            // Action Button: Save & Issue Invoice
             Button(
                 onClick = {
-                    val partialVal = partialAmountText.toDoubleOrNull() ?: 0.0
-                    viewModel.completeCheckout(isPartialPaid = isPartialPaid, partialPaidAmount = partialVal)
+                    val pVal = if (isPartialPaid) (partialAmountText.toDoubleOrNull() ?: 0.0) else if (state.paymentType == PaymentType.CASH) invoiceTotal else 0.0
+                    viewModel.saveTableInvoice(
+                        rows = state.draftTableRows,
+                        paymentType = state.paymentType,
+                        customerId = state.selectedCustomer?.id,
+                        customerName = state.selectedCustomer?.name,
+                        paidAmount = pVal
+                    )
                 },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                enabled = totalAmount > 0
+                enabled = state.draftTableRows.isNotEmpty()
             ) {
                 Icon(Icons.Default.ReceiptLong, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("إصدار وطباعة الفاتورة", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("حفظ وإصدار الفاتورة (${String.format(Locale.US, "%,.2f", invoiceTotal)} ${state.storeInfo.currency})", fontWeight = FontWeight.Bold, fontSize = 15.sp)
             }
         }
     }
@@ -624,6 +974,17 @@ fun FreeInvoiceCard(viewModel: GroceryViewModel, state: PosUiState) {
                 showCustomerPicker = false
             },
             onDismiss = { showCustomerPicker = false }
+        )
+    }
+
+    if (showWarehousePicker) {
+        WarehouseItemPickerDialog(
+            products = state.products,
+            onSelect = { prod ->
+                viewModel.addProductToDraftTable(prod)
+                showWarehousePicker = false
+            },
+            onDismiss = { showWarehousePicker = false }
         )
     }
 }
@@ -947,6 +1308,129 @@ fun CustomerPickerDialog(
         confirmButton = {
             TextButton(onClick = onDismiss) {
                 Text("إلغاء")
+            }
+        }
+    )
+}
+
+@Composable
+fun WarehouseItemPickerDialog(
+    products: List<Product>,
+    onSelect: (Product) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    var selectedCat by remember { mutableStateOf<ProductCategory?>(null) }
+    val filtered = remember(products, query, selectedCat) {
+        products.filter { p ->
+            val matchCat = selectedCat == null || p.category == selectedCat
+            val matchQuery = query.isBlank() ||
+                    p.name.contains(query, ignoreCase = true) ||
+                    p.barcode.contains(query, ignoreCase = true)
+            matchCat && matchQuery
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Inventory2, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("اختر صنفاً من المخزون", fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = { Text("بحث بالاسم أو الباركود...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    item {
+                        FilterChip(
+                            selected = selectedCat == null,
+                            onClick = { selectedCat = null },
+                            label = { Text("الكل", fontSize = 11.sp) }
+                        )
+                    }
+                    items(ProductCategory.values()) { cat ->
+                        FilterChip(
+                            selected = selectedCat == cat,
+                            onClick = { selectedCat = if (selectedCat == cat) null else cat },
+                            label = { Text(cat.titleAr, fontSize = 11.sp) }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (filtered.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("لا توجد أصناف مطابقة", color = MaterialTheme.colorScheme.outline)
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(260.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(filtered, key = { it.id }) { product ->
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onSelect(product) },
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(product.name, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text(
+                                            "المخزون: ${if (product.stockQty % 1.0 == 0.0) product.stockQty.toInt().toString() else product.stockQty} ${product.unit}",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.outline
+                                        )
+                                    }
+                                    Text(
+                                        "${String.format(Locale.US, "%.2f", product.sellPrice)} ر.ي",
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("إغلاق")
             }
         }
     )

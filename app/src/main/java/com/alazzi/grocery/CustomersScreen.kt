@@ -177,11 +177,13 @@ fun CustomersScreen(
                     items(filteredCustomers, key = { it.id }) { customer ->
                         CustomerItemCard(
                             customer = customer,
+                            currency = state.storeInfo.currency,
                             onPayDebt = { viewModel.showDebtPaymentDialog(customer) },
+                            onShowStatement = { viewModel.showCustomerStatement(customer) },
                             onEdit = { viewModel.showAddCustomerDialog(true, customer) },
                             onDelete = { viewModel.deleteCustomer(customer.id) },
                             onSendWhatsApp = {
-                                val text = "السلام عليكم ورحمة الله وبركاته يا أخي الكريم ${customer.name}، نود تذكيركم بلطف بأن رصيد حسابكم الحالي لدى *بقالة العزي للمواد الغذائية* هو *${String.format(Locale.US, "%.2f", customer.balanceDebt)} ر.ي*.\nشاكرين ومقدرين حسن تعاملكم معنا دائماً 🙏"
+                                val text = "السلام عليكم ورحمة الله وبركاته يا أخي الكريم ${customer.name}، نود تذكيركم بلطف بأن رصيد حسابكم الحالي لدى *${state.storeInfo.name}* هو *${String.format(Locale.US, "%.2f", customer.balanceDebt)} ${state.storeInfo.currency}*.\nشاكرين ومقدرين حسن تعاملكم معنا دائماً 🙏"
                                 ThermalReceiptHelper.shareViaWhatsApp(context, customer.phone, text)
                             }
                         )
@@ -222,7 +224,9 @@ fun CustomersScreen(
 @Composable
 fun CustomerItemCard(
     customer: Customer,
+    currency: String = "ر.ي",
     onPayDebt: () -> Unit,
+    onShowStatement: () -> Unit = {},
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onSendWhatsApp: () -> Unit
@@ -282,7 +286,7 @@ fun CustomerItemCard(
                         ) {
                             Text("دين مستحق", style = MaterialTheme.typography.labelSmall, color = OnDebtRed)
                             Text(
-                                text = "${String.format(Locale.US, "%.2f", customer.balanceDebt)} ر.ي",
+                                text = "${String.format(Locale.US, "%.2f", customer.balanceDebt)} $currency",
                                 fontWeight = FontWeight.Bold,
                                 color = DebtRed,
                                 style = MaterialTheme.typography.bodyMedium
@@ -295,7 +299,7 @@ fun CustomerItemCard(
                         color = MaterialTheme.colorScheme.primaryContainer
                     ) {
                         Text(
-                            text = "خالص (0.00 ر.ي)",
+                            text = "خالص (0.00 $currency)",
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
@@ -344,6 +348,16 @@ fun CustomerItemCard(
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("واتساب", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
+                    }
+
+                    OutlinedButton(
+                        onClick = onShowStatement,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("كشف حساب", fontSize = 12.sp)
                     }
                 }
 
